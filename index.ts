@@ -1,8 +1,8 @@
 import * as THREE from "three";
 type Callback = (...params: any) => any;
-type Progress = ((request: ProgressEvent) => void) | undefined;
-type Load = ((result: THREE.BufferGeometry) => void) | undefined;
-type Error = ((event: ErrorEvent) => void) | undefined;
+type Progress = (request: ProgressEvent) => void;
+type Load = (result: THREE.BufferGeometry) => void;
+type Error = (event: ErrorEvent) => void;
 type Map<A> = { [key: string]: A };
 
 class PlyLoader {
@@ -14,8 +14,8 @@ class PlyLoader {
   load = (
     url: string,
     onLoad: Load = () => {},
-    onProgress: Progress,
-    onError: Error
+    onProgress?: Progress,
+    onError?: Error
   ) => {
     const loader = new THREE.FileLoader(this.manager);
     loader.setResponseType("arraybuffer");
