@@ -1,6 +1,6 @@
 {
   "name": "three-ply-loader-ts",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "ThreeJS's Ply loader as a typescript module",
   "main": "dist/index.js",
   "scripts": {
