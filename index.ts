@@ -1,23 +1,53 @@
 import * as THREE from "three";
-type Callback = (...params: any) => any;
-type Progress = (request: ProgressEvent) => void;
-type Load = (result: THREE.BufferGeometry) => void;
-type Error = (event: ErrorEvent) => void;
-type Map<A> = { [key: string]: A };
+/**
+ * @author Wei Meng / http://about.me/menway
+ *
+ * Description: A THREE loader for PLY ASCII files (known as the Polygon
+ * File Format or the Stanford Triangle Format).
+ *
+ * Limitations: ASCII decoding assumes file is UTF-8.
+ *
+ * Usage:
+ *	var loader = new THREE.PLYLoader();
+ *	loader.load('./models/ply/ascii/dolphins.ply', function (geometry) {
+ *
+ *		scene.add( new THREE.Mesh( geometry ) );
+ *
+ *	} );
+ *
+ * If the PLY file uses non standard property names, they can be mapped while
+ * loading. For example, the following maps the properties
+ * “diffuse_(red|green|blue)” in the file to standard color names.
+ *
+ * loader.setPropertyNameMapping( {
+ *	diffuse_red: 'red',
+ *	diffuse_green: 'green',
+ *	diffuse_blue: 'blue'
+ * } );
+ *
+ */
 
-class PlyLoader {
+type Indexable<A> = { [field: string]: A };
+
+class PLYLoader {
   manager: THREE.LoadingManager;
-  propertyNameMapping: any;
+  propertyNameMapping: Indexable<string>;
+  path: string;
   constructor(manager?: THREE.LoadingManager) {
-    this.manager = manager || THREE.DefaultLoadingManager;
+    this.manager =
+      manager !== undefined ? manager : THREE.DefaultLoadingManager;
+    this.propertyNameMapping = {};
+    this.path = "";
   }
   load = (
     url: string,
-    onLoad: Load = () => {},
-    onProgress?: Progress,
-    onError?: Error
+    onLoad: (result: THREE.BufferGeometry) => void,
+    onProgress?: (request: ProgressEvent) => void,
+    onError?: (event: ErrorEvent) => void
   ) => {
-    const loader = new THREE.FileLoader(this.manager);
+    var scope = this;
+    var loader = new THREE.FileLoader(this.manager);
+    loader.setPath(this.path);
     loader.setResponseType("arraybuffer");
     loader.load(
       url,
@@ -28,28 +58,18 @@ class PlyLoader {
       onError
     );
   };
-  setPropertyNameMapping = (mapping: any) => {
+  setPath = (value: string) => {
+    this.path = value;
+    return this;
+  };
+
+  setPropertyNameMapping = (mapping: Indexable<string>) => {
     this.propertyNameMapping = mapping;
   };
+
   parse = (data: string | ArrayBuffer) => {
-    function isASCII(data: string | ArrayBuffer) {
-      var header = parseHeader(bin2str(data));
-      return header.format === "ascii";
-    }
-
-    function bin2str(buf: any) {
-      var array_buffer = new Uint8Array(buf);
-      var str = "";
-
-      for (var i = 0; i < buf.byteLength; i++) {
-        str += String.fromCharCode(array_buffer[i]); // implicitly assumes little-endian
-      }
-
-      return str;
-    }
-
-    function parseHeader(data: string) {
-      var patternHeader = /ply([\s\S]*)end_header\s/;
+    function parseHeader(data: any) {
+      var patternHeader = /ply([\s\S]*)end_header\r?\n/;
       var headerText = "";
       var headerLength = 0;
       var result = patternHeader.exec(data);
@@ -59,28 +79,21 @@ class PlyLoader {
         headerLength = result[0].length;
       }
 
-      var header = {
-        comments: [] as string[],
-        elements: [] as any[],
-        headerLength: headerLength,
-        format: "",
-        version: ""
+      var header: any = {
+        comments: [],
+        elements: [],
+        headerLength: headerLength
       };
 
       var lines = headerText.split("\n");
-      var currentElement;
+      var currentElement: any;
       var lineType, lineValues;
 
       function make_ply_element_property(
-        propertValues: any[],
-        propertyNameMapping: Map<string>
+        propertValues: any,
+        propertyNameMapping: any
       ) {
-        var property: {
-          name?: string;
-          countType?: string;
-          itemType?: string;
-          type: string;
-        } = { type: propertValues[0] };
+        var property: any = { type: propertValues[0] };
 
         if (property.type === "list") {
           property.name = propertValues[3];
@@ -90,7 +103,7 @@ class PlyLoader {
           property.name = propertValues[1];
         }
 
-        if (property.name && property.name in propertyNameMapping) {
+        if (property.name in propertyNameMapping) {
           property.name = propertyNameMapping[property.name];
         }
 
@@ -124,11 +137,7 @@ class PlyLoader {
               header.elements.push(currentElement);
             }
 
-            currentElement = {
-              name: "",
-              count: 0,
-              properties: [] as any[]
-            };
+            currentElement = {};
             currentElement.name = lineValues[0];
             currentElement.count = parseInt(lineValues[1]);
             currentElement.properties = [];
@@ -136,11 +145,10 @@ class PlyLoader {
             break;
 
           case "property":
-            if (currentElement) {
-              currentElement.properties.push(
-                make_ply_element_property(lineValues, scope.propertyNameMapping)
-              );
-            }
+            currentElement.properties.push(
+              make_ply_element_property(lineValues, scope.propertyNameMapping)
+            );
+
             break;
 
           default:
@@ -177,14 +185,14 @@ class PlyLoader {
         case "float64":
           return parseFloat(n);
         default:
-          return 0;
+          return parseInt(n);
       }
     }
 
-    function parseASCIIElement(properties: any[], line: any) {
+    function parseASCIIElement(properties: any, line: any) {
       var values = line.split(/\s+/);
 
-      var element: Map<any> = {};
+      var element: Indexable<any> = {};
 
       for (var i = 0; i < properties.length; i++) {
         if (properties[i].type === "list") {
@@ -207,7 +215,7 @@ class PlyLoader {
       return element;
     }
 
-    function parseASCII(data: string) {
+    function parseASCII(data: any, header: any) {
       // PLY ascii format specification, as per http://en.wikipedia.org/wiki/PLY_(file_format)
 
       var buffer = {
@@ -215,12 +223,11 @@ class PlyLoader {
         vertices: [],
         normals: [],
         uvs: [],
+        faceVertexUvs: [],
         colors: []
       };
 
       var result;
-
-      var header = parseHeader(data);
 
       var patternBody = /end_header\s([\s\S]*)$/;
       var body = "";
@@ -263,6 +270,7 @@ class PlyLoader {
       // mandatory buffer data
 
       if (buffer.indices.length > 0) {
+        console.log(buffer);
         geometry.setIndex(buffer.indices);
       }
 
@@ -294,7 +302,16 @@ class PlyLoader {
         );
       }
 
+      if (buffer.faceVertexUvs.length > 0) {
+        geometry = geometry.toNonIndexed();
+        geometry.addAttribute(
+          "uv",
+          new THREE.Float32BufferAttribute(buffer.faceVertexUvs, 2)
+        );
+      }
+
       geometry.computeBoundingSphere();
+      geometry.computeBoundingBox();
 
       return geometry;
     }
@@ -320,6 +337,7 @@ class PlyLoader {
         }
       } else if (elementName === "face") {
         var vertex_indices = element.vertex_indices || element.vertex_index; // issue #9338
+        var texcoord = element.texcoord;
 
         if (vertex_indices.length === 3) {
           buffer.indices.push(
@@ -327,6 +345,12 @@ class PlyLoader {
             vertex_indices[1],
             vertex_indices[2]
           );
+
+          if (texcoord && texcoord.length === 6) {
+            buffer.faceVertexUvs.push(texcoord[0], texcoord[1]);
+            buffer.faceVertexUvs.push(texcoord[2], texcoord[3]);
+            buffer.faceVertexUvs.push(texcoord[4], texcoord[5]);
+          }
         } else if (vertex_indices.length === 4) {
           buffer.indices.push(
             vertex_indices[0],
@@ -342,12 +366,7 @@ class PlyLoader {
       }
     }
 
-    function binaryRead(
-      dataview: any,
-      at: any,
-      type: any,
-      little_endian: boolean
-    ): any[] {
+    function binaryRead(dataview: any, at: any, type: any, little_endian: any) {
       switch (type) {
         // corespondences for non-specific length types here match rply:
         case "int8":
@@ -374,19 +393,17 @@ class PlyLoader {
         case "float64":
         case "double":
           return [dataview.getFloat64(at, little_endian), 8];
-        default:
-          return [];
       }
     }
 
     function binaryReadElement(
       dataview: any,
-      at: number,
-      properties: any[],
-      little_endian: boolean
-    ): [Map<any>, number] {
-      var element: Map<any> = {};
-      var result,
+      at: any,
+      properties: any,
+      little_endian: any
+    ) {
+      var element: any = {};
+      var result: any,
         read = 0;
 
       for (var i = 0; i < properties.length; i++) {
@@ -429,16 +446,16 @@ class PlyLoader {
       return [element, read];
     }
 
-    function parseBinary(data: any) {
+    function parseBinary(data: any, header: any) {
       var buffer = {
         indices: [],
         vertices: [],
         normals: [],
         uvs: [],
+        faceVertexUvs: [],
         colors: []
       };
 
-      var header = parseHeader(bin2str(data));
       var little_endian = header.format === "binary_little_endian";
       var body = new DataView(data, header.headerLength);
       var result,
@@ -470,17 +487,25 @@ class PlyLoader {
       return postProcess(buffer);
     }
 
+    //
+
     var geometry;
     var scope = this;
 
     if (data instanceof ArrayBuffer) {
-      geometry = isASCII(data) ? parseASCII(bin2str(data)) : parseBinary(data);
+      var text = THREE.LoaderUtils.decodeText(new Uint8Array(data));
+      var header = parseHeader(text);
+
+      geometry =
+        header.format === "ascii"
+          ? parseASCII(text, header)
+          : parseBinary(data, header);
     } else {
-      geometry = parseASCII(data);
+      geometry = parseASCII(data, parseHeader(data));
     }
 
     return geometry;
   };
 }
 
-export default PlyLoader;
+export default PLYLoader;

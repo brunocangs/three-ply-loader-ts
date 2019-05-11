@@ -1,13 +1,15 @@
 import * as THREE from "three";
-declare type Progress = (request: ProgressEvent) => void;
-declare type Load = (result: THREE.BufferGeometry) => void;
-declare type Error = (event: ErrorEvent) => void;
-declare class PlyLoader {
+declare type Indexable<A> = {
+    [field: string]: A;
+};
+declare class PLYLoader {
     manager: THREE.LoadingManager;
-    propertyNameMapping: any;
+    propertyNameMapping: Indexable<string>;
+    path: string;
     constructor(manager?: THREE.LoadingManager);
-    load: (url: string, onLoad?: Load, onProgress?: Progress | undefined, onError?: Error | undefined) => void;
-    setPropertyNameMapping: (mapping: any) => void;
+    load: (url: string, onLoad: (result: THREE.BufferGeometry) => void, onProgress?: ((request: ProgressEvent) => void) | undefined, onError?: ((event: ErrorEvent) => void) | undefined) => void;
+    setPath: (value: string) => this;
+    setPropertyNameMapping: (mapping: Indexable<string>) => void;
     parse: (data: string | ArrayBuffer) => THREE.BufferGeometry;
 }
-export default PlyLoader;
+export default PLYLoader;

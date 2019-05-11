@@ -8,35 +8,28 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 var THREE = __importStar(require("three"));
-var PlyLoader = (function () {
-    function PlyLoader(manager) {
+var PLYLoader = (function () {
+    function PLYLoader(manager) {
         var _this = this;
         this.load = function (url, onLoad, onProgress, onError) {
-            if (onLoad === void 0) { onLoad = function () { }; }
+            var scope = _this;
             var loader = new THREE.FileLoader(_this.manager);
+            loader.setPath(_this.path);
             loader.setResponseType("arraybuffer");
             loader.load(url, function (text) {
                 onLoad(_this.parse(text));
             }, onProgress, onError);
         };
+        this.setPath = function (value) {
+            _this.path = value;
+            return _this;
+        };
         this.setPropertyNameMapping = function (mapping) {
             _this.propertyNameMapping = mapping;
         };
         this.parse = function (data) {
-            function isASCII(data) {
-                var header = parseHeader(bin2str(data));
-                return header.format === "ascii";
-            }
-            function bin2str(buf) {
-                var array_buffer = new Uint8Array(buf);
-                var str = "";
-                for (var i = 0; i < buf.byteLength; i++) {
-                    str += String.fromCharCode(array_buffer[i]);
-                }
-                return str;
-            }
             function parseHeader(data) {
-                var patternHeader = /ply([\s\S]*)end_header\s/;
+                var patternHeader = /ply([\s\S]*)end_header\r?\n/;
                 var headerText = "";
                 var headerLength = 0;
                 var result = patternHeader.exec(data);
@@ -47,9 +40,7 @@ var PlyLoader = (function () {
                 var header = {
                     comments: [],
                     elements: [],
-                    headerLength: headerLength,
-                    format: "",
-                    version: ""
+                    headerLength: headerLength
                 };
                 var lines = headerText.split("\n");
                 var currentElement;
@@ -64,7 +55,7 @@ var PlyLoader = (function () {
                     else {
                         property.name = propertValues[1];
                     }
-                    if (property.name && property.name in propertyNameMapping) {
+                    if (property.name in propertyNameMapping) {
                         property.name = propertyNameMapping[property.name];
                     }
                     return property;
@@ -89,19 +80,13 @@ var PlyLoader = (function () {
                             if (currentElement !== undefined) {
                                 header.elements.push(currentElement);
                             }
-                            currentElement = {
-                                name: "",
-                                count: 0,
-                                properties: []
-                            };
+                            currentElement = {};
                             currentElement.name = lineValues[0];
                             currentElement.count = parseInt(lineValues[1]);
                             currentElement.properties = [];
                             break;
                         case "property":
-                            if (currentElement) {
-                                currentElement.properties.push(make_ply_element_property(lineValues, scope.propertyNameMapping));
-                            }
+                            currentElement.properties.push(make_ply_element_property(lineValues, scope.propertyNameMapping));
                             break;
                         default:
                             console.log("unhandled", lineType, lineValues);
@@ -133,7 +118,7 @@ var PlyLoader = (function () {
                     case "float64":
                         return parseFloat(n);
                     default:
-                        return 0;
+                        return parseInt(n);
                 }
             }
             function parseASCIIElement(properties, line) {
@@ -154,16 +139,16 @@ var PlyLoader = (function () {
                 }
                 return element;
             }
-            function parseASCII(data) {
+            function parseASCII(data, header) {
                 var buffer = {
                     indices: [],
                     vertices: [],
                     normals: [],
                     uvs: [],
+                    faceVertexUvs: [],
                     colors: []
                 };
                 var result;
-                var header = parseHeader(data);
                 var patternBody = /end_header\s([\s\S]*)$/;
                 var body = "";
                 if ((result = patternBody.exec(data)) !== null) {
@@ -191,6 +176,7 @@ var PlyLoader = (function () {
             function postProcess(buffer) {
                 var geometry = new THREE.BufferGeometry();
                 if (buffer.indices.length > 0) {
+                    console.log(buffer);
                     geometry.setIndex(buffer.indices);
                 }
                 geometry.addAttribute("position", new THREE.Float32BufferAttribute(buffer.vertices, 3));
@@ -203,7 +189,12 @@ var PlyLoader = (function () {
                 if (buffer.colors.length > 0) {
                     geometry.addAttribute("color", new THREE.Float32BufferAttribute(buffer.colors, 3));
                 }
+                if (buffer.faceVertexUvs.length > 0) {
+                    geometry = geometry.toNonIndexed();
+                    geometry.addAttribute("uv", new THREE.Float32BufferAttribute(buffer.faceVertexUvs, 2));
+                }
                 geometry.computeBoundingSphere();
+                geometry.computeBoundingBox();
                 return geometry;
             }
             function handleElement(buffer, elementName, element) {
@@ -221,8 +212,14 @@ var PlyLoader = (function () {
                 }
                 else if (elementName === "face") {
                     var vertex_indices = element.vertex_indices || element.vertex_index;
+                    var texcoord = element.texcoord;
                     if (vertex_indices.length === 3) {
                         buffer.indices.push(vertex_indices[0], vertex_indices[1], vertex_indices[2]);
+                        if (texcoord && texcoord.length === 6) {
+                            buffer.faceVertexUvs.push(texcoord[0], texcoord[1]);
+                            buffer.faceVertexUvs.push(texcoord[2], texcoord[3]);
+                            buffer.faceVertexUvs.push(texcoord[4], texcoord[5]);
+                        }
                     }
                     else if (vertex_indices.length === 4) {
                         buffer.indices.push(vertex_indices[0], vertex_indices[1], vertex_indices[3]);
@@ -256,8 +253,6 @@ var PlyLoader = (function () {
                     case "float64":
                     case "double":
                         return [dataview.getFloat64(at, little_endian), 8];
-                    default:
-                        return [];
                 }
             }
             function binaryReadElement(dataview, at, properties, little_endian) {
@@ -284,15 +279,15 @@ var PlyLoader = (function () {
                 }
                 return [element, read];
             }
-            function parseBinary(data) {
+            function parseBinary(data, header) {
                 var buffer = {
                     indices: [],
                     vertices: [],
                     normals: [],
                     uvs: [],
+                    faceVertexUvs: [],
                     colors: []
                 };
-                var header = parseHeader(bin2str(data));
                 var little_endian = header.format === "binary_little_endian";
                 var body = new DataView(data, header.headerLength);
                 var result, loc = 0;
@@ -309,15 +304,23 @@ var PlyLoader = (function () {
             var geometry;
             var scope = _this;
             if (data instanceof ArrayBuffer) {
-                geometry = isASCII(data) ? parseASCII(bin2str(data)) : parseBinary(data);
+                var text = THREE.LoaderUtils.decodeText(new Uint8Array(data));
+                var header = parseHeader(text);
+                geometry =
+                    header.format === "ascii"
+                        ? parseASCII(text, header)
+                        : parseBinary(data, header);
             }
             else {
-                geometry = parseASCII(data);
+                geometry = parseASCII(data, parseHeader(data));
             }
             return geometry;
         };
-        this.manager = manager || THREE.DefaultLoadingManager;
+        this.manager =
+            manager !== undefined ? manager : THREE.DefaultLoadingManager;
+        this.propertyNameMapping = {};
+        this.path = "";
     }
-    return PlyLoader;
+    return PLYLoader;
 }());
-exports.default = PlyLoader;
+exports.default = PLYLoader;
